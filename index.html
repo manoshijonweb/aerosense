@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AeroSense</title>
+<meta name="description" content="Live air quality readings from the AeroSense monitor.">
+<style>
+  /* ---------------------------------------------------------------------
+     Palette: the dataviz reference instance, used verbatim. Series slots are
+     the first three categorical hues (blue / orange / aqua), which are the
+     set validated for all-pairs separation in both light and dark modes.
+     Dark values are separately chosen steps for the dark surface, not a flip.
+     --------------------------------------------------------------------- */
+  :root {
+    color-scheme: light;
+    --plane:        #f9f9f7;
+    --surface:      #fcfcfb;
+    --ink:          #0b0b0b;
+    --ink-2:        #52514e;
+    --muted:        #898781;
+    --grid:         #e1e0d9;
+    --axis:         #c3c2b7;
+    --border:       rgba(11,11,11,0.10);
+
+    --series-1:     #2a78d6;  /* PM2.5 */
+    --series-2:     #eb6834;  /* PM10  */
+    --series-3:     #1baf7a;  /* PM1.0 */
+
+    --good:         #0ca30c;
+    --warning:      #fab219;
+    --serious:      #ec835a;
+    --critical:     #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plane:      #0d0d0d;
+      --surface:    #1a1a19;
+      --ink:        #ffffff;
+      --ink-2:      #c3c2b7;
+      --muted:      #898781;
+      --grid:       #2c2c2a;
+      --axis:       #383835;
+      --border:     rgba(255,255,255,0.10);
+      --series-1:   #3987e5;
+      --series-2:   #d95926;
+      --series-3:   #199e70;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:        #0d0d0d;
+    --surface:      #1a1a19;
+    --ink:          #ffffff;
+    --ink-2:        #c3c2b7;
+    --muted:        #898781;
+    --grid:         #2c2c2a;
+    --axis:         #383835;
+    --border:       rgba(255,255,255,0.10);
+    --series-1:     #3987e5;
+    --series-2:     #d95926;
+    --series-3:     #199e70;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--plane);
+    color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 56px; }
+
+  /* ------------------------------------------------------------- sign in */
+  .signin { max-width: 380px; margin: 12vh auto; padding: 0 16px; }
+  .signin h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .signin p { color: var(--ink-2); margin: 0 0 24px; font-size: 14px; }
+  label { display: block; font-size: 13px; color: var(--ink-2); margin: 0 0 6px; }
+  input {
+    width: 100%; padding: 10px 12px; margin: 0 0 16px;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--axis); border-radius: 8px;
+    font: inherit;
+  }
+  input:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px;
+    border: 1px solid var(--axis); background: var(--surface); color: var(--ink);
+    padding: 8px 14px;
+  }
+  button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  .primary {
+    width: 100%; padding: 11px; background: var(--series-1);
+    border-color: var(--series-1); color: #fff; font-weight: 600;
+  }
+  .err {
+    color: var(--critical); font-size: 13px; margin: 0 0 14px;
+    display: flex; gap: 6px; align-items: flex-start;
+  }
+
+  /* -------------------------------------------------------------- header */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap; margin-bottom: 24px;
+  }
+  header h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .spacer { flex: 1 1 auto; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--ink-2);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 10px; background: var(--surface);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+  /* ---------------------------------------------------------------- hero */
+  .hero {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 22px; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  }
+  .hero-fig { font-size: 60px; font-weight: 650; line-height: 1; letter-spacing: -0.03em; }
+  .hero-meta { display: flex; flex-direction: column; gap: 4px; }
+  .hero-cat { font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .hero-sub { font-size: 13px; color: var(--ink-2); }
+  .cap { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+  /* --------------------------------------------------------------- tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 26px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .tile .k { display: flex; align-items: center; gap: 7px; }
+  .tile .v { font-size: 26px; font-weight: 620; line-height: 1.15; margin-top: 6px; letter-spacing: -0.02em; }
+  .tile .u { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+  .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+
+  /* -------------------------------------------------------------- charts */
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .toolbar .grp { display: flex; gap: 0; border: 1px solid var(--axis); border-radius: 8px; overflow: hidden; }
+  .toolbar .grp button { border: 0; border-radius: 0; padding: 7px 13px; font-size: 13px; color: var(--ink-2); }
+  .toolbar .grp button + button { border-left: 1px solid var(--axis); }
+  .toolbar .grp button[aria-pressed="true"] { background: var(--series-1); color: #fff; font-weight: 600; }
+
+  figure {
+    margin: 0 0 18px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px 16px 10px;
+  }
+  figcaption { margin-bottom: 2px; }
+  figcaption .t { font-size: 15px; font-weight: 600; }
+  figcaption .s { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 2px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+  .chart { position: relative; width: 100%; }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .tip {
+    position: absolute; pointer-events: none; opacity: 0;
+    background: var(--surface); border: 1px solid var(--axis);
+    border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.13); transition: opacity .1s; z-index: 5;
+    min-width: 116px;
+  }
+  .tip .tt { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+  .tip .tr { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+  .tip .tr b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-2); font-weight: 600; }
+  .tablewrap { max-height: 340px; overflow: auto; }
+
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 18px; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ sign in -->
+<section class="signin" id="signin">
+  <h1>AeroSense</h1>
+  <p>Sign in to view readings from this monitor.</p>
+  <div class="err hide" id="signinErr"></div>
+  <form id="signinForm">
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button class="primary" type="submit" id="signinBtn">Sign in</button>
+  </form>
+</section>
+
+<!-- ========================================================== dashboard -->
+<main class="wrap hide" id="app">
+  <header>
+    <h1>AeroSense</h1>
+    <span class="pill"><span class="dot" id="linkDot"></span><span id="linkText">connecting</span></span>
+    <span class="spacer"></span>
+    <button id="themeBtn" type="button">Dark</button>
+    <button id="outBtn" type="button">Sign out</button>
+  </header>
+
+  <section class="hero">
+    <div>
+      <div class="cap">Air quality index</div>
+      <div class="hero-fig" id="aqi">—</div>
+    </div>
+    <div class="hero-meta">
+      <div class="hero-cat" id="aqiCat"><span class="dot"></span><span>No data</span></div>
+      <div class="hero-sub" id="aqiSub">Waiting for the first reading…</div>
+    </div>
+  </section>
+
+  <section class="tiles" id="tiles"></section>
+
+  <div class="toolbar">
+    <div class="grp" role="group" aria-label="Time range">
+      <button type="button" data-range="60" aria-pressed="true">1 hour</button>
+      <button type="button" data-range="360" aria-pressed="false">6 hours</button>
+      <button type="button" data-range="1440" aria-pressed="false">24 hours</button>
+    </div>
+    <div class="grp" role="group" aria-label="View">
+      <button type="button" id="viewChart" aria-pressed="true">Charts</button>
+      <button type="button" id="viewTable" aria-pressed="false">Table</button>
+    </div>
+  </div>
+
+  <div id="charts"></div>
+
+  <figure id="tableFig" class="hide">
+    <figcaption><span class="t">History</span><span class="s" id="tableSub"></span></figcaption>
+    <div class="tablewrap"><table id="histTable"></table></div>
+  </figure>
+
+  <p class="note" id="note"></p>
+</main>
+
+<script>
+/* =====================================================================
+   Config. The API key is public by design — it identifies the project and
+   grants nothing on its own; the database rules are what control access.
+   The viewer account this page signs in with has read-only rights.
+   ===================================================================== */
+const CFG = {
+  apiKey: "AIzaSyB_HO890fFO5zyOjDKxSbz0Z-omP22H-ZM",
+  dbUrl:  "https://kavya-aerosense-60654-default-rtdb.asia-southeast1.firebasedatabase.app",
+  device: "aerosense-01",
+  livePollMs: 5000,
+  histPollMs: 60000,
+  staleAfterMs: 30000   // device writes every 5s; 30s without one means trouble
+};
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} }
+};
+
+/* ------------------------------------------------------------- auth ---- */
+let idToken = null, refreshToken = null, tokenExpiry = 0;
+
+async function signIn(email, password) {
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CFG.apiKey}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, returnSecureToken: true })
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error?.message || "SIGN_IN_FAILED");
+  setTokens(j.idToken, j.refreshToken, j.expiresIn);
+}
+
+function setTokens(id, refresh, expiresIn) {
+  idToken = id; refreshToken = refresh;
+  tokenExpiry = Date.now() + (Number(expiresIn) || 3600) * 1000;
+  store.set("aerosense_rt", refresh);
+}
+
+async function refresh() {
+  if (!refreshToken) throw new Error("NO_REFRESH_TOKEN");
+  const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${CFG.apiKey}`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error?.message || "REFRESH_FAILED");
+  setTokens(j.id_token, j.refresh_token, j.expires_in);
+}
+
+// Refresh a minute before expiry rather than reacting to a 401, so a poll
+// never fails just because the hour rolled over.
+async function token() {
+  if (!idToken || Date.now() > tokenExpiry - 60000) await refresh();
+  return idToken;
+}
+
+async function dbGet(path, query = "") {
+  const t = await token();
+  const url = `${CFG.dbUrl}/${path}.json?auth=${encodeURIComponent(t)}${query}`;
+  const r = await fetch(url);
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(r.status === 401 || /Permission denied/i.test(txt)
+      ? "PERMISSION_DENIED" : `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+/* ----------------------------------------------------------- AQI bands - */
+// Six EPA bands mapped onto the four reserved status colours. The band name is
+// always rendered beside the colour, so hue never carries the meaning alone.
+const BANDS = [
+  { max: 50,  name: "Good",            v: "--good" },
+  { max: 100, name: "Moderate",        v: "--warning" },
+  { max: 150, name: "Sensitive groups", v: "--serious" },
+  { max: 200, name: "Unhealthy",       v: "--critical" },
+  { max: 300, name: "Very unhealthy",  v: "--critical" },
+  { max: 999, name: "Hazardous",       v: "--critical" }
+];
+const band = a => BANDS.find(b => a <= b.max) || BANDS[BANDS.length - 1];
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* ------------------------------------------------------------- charts -- */
+const SERIES = [
+  { key: "pm2_5", label: "PM2.5", v: "--series-1" },
+  { key: "pm10",  label: "PM10",  v: "--series-2" },
+  { key: "pm1_0", label: "PM1.0", v: "--series-3" }
+];
+
+const fmtTime = ms => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const niceMax = v => { if (v <= 5) return 5; const p = Math.pow(10, Math.floor(Math.log10(v))); return Math.ceil(v / (p / 2)) * (p / 2); };
+
+/* One line chart. Single y-axis only: series on a chart always share units,
+   so PM, AQI and gas each get their own figure rather than a second scale. */
+function lineChart(host, rows, series, opts) {
+  const W = 760, H = 220, mL = 44, mR = 14, mT = 10, mB = 26;
+  const pts = rows.filter(r => r.ts);
+  host.innerHTML = "";
+  if (pts.length < 2) {
+    host.innerHTML = `<p style="color:var(--muted);font-size:13px;padding:22px 0">Not enough history yet — the device appends a record once a minute.</p>`;
+    return;
+  }
+  const t0 = pts[0].ts, t1 = pts[pts.length - 1].ts;
+  let vmax = 0;
+  for (const r of pts) for (const s of series) if (Number.isFinite(r[s.key])) vmax = Math.max(vmax, r[s.key]);
+  vmax = niceMax(vmax || 1);
+
+  const x = t => mL + (W - mL - mR) * (t1 === t0 ? 0.5 : (t - t0) / (t1 - t0));
+  const y = v => mT + (H - mT - mB) * (1 - v / vmax);
+
+  const ticks = 4, gridY = [];
+  for (let i = 0; i <= ticks; i++) gridY.push(vmax * i / ticks);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opts.aria}">`;
+  for (const g of gridY) {
+    svg += `<line x1="${mL}" y1="${y(g).toFixed(1)}" x2="${W - mR}" y2="${y(g).toFixed(1)}" stroke="var(--grid)" stroke-width="1"/>`;
+    svg += `<text x="${mL - 8}" y="${(y(g) + 3.5).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${g % 1 ? g.toFixed(1) : g}</text>`;
+  }
+  svg += `<line x1="${mL}" y1="${H - mB}" x2="${W - mR}" y2="${H - mB}" stroke="var(--axis)" stroke-width="1"/>`;
+  const nTick = Math.min(5, pts.length);
+  for (let i = 0; i < nTick; i++) {
+    const p = pts[Math.round(i * (pts.length - 1) / (nTick - 1 || 1))];
+    svg += `<text x="${x(p.ts).toFixed(1)}" y="${H - mB + 15}" text-anchor="middle" font-size="11" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${fmtTime(p.ts)}</text>`;
+  }
+  for (const s of series) {
+    const d = pts.filter(r => Number.isFinite(r[s.key]))
+                 .map((r, i) => `${i ? "L" : "M"}${x(r.ts).toFixed(1)} ${y(r[s.key]).toFixed(1)}`).join(" ");
+    svg += `<path d="${d}" fill="none" stroke="var(${s.v})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = [...pts].reverse().find(r => Number.isFinite(r[s.key]));
+    if (last) svg += `<circle cx="${x(last.ts).toFixed(1)}" cy="${y(last[s.key]).toFixed(1)}" r="4" fill="var(${s.v})" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+  svg += `<line id="cx" x1="0" y1="${mT}" x2="0" y2="${H - mB}" stroke="var(--axis)" stroke-width="1" opacity="0"/>`;
+  svg += `<rect x="${mL}" y="${mT}" width="${W - mL - mR}" height="${H - mT - mB}" fill="transparent" id="hit"/>`;
+  svg += `</svg><div class="tip"></div>`;
+  host.innerHTML = svg;
+
+  // Crosshair + tooltip. Shipped by default on line charts.
+  const el = host.querySelector("svg"), cx = host.querySelector("#cx"),
+        hit = host.querySelector("#hit"), tip = host.querySelector(".tip");
+  const move = ev => {
+    const bb = el.getBoundingClientRect();
+    const px = (ev.touches ? ev.touches[0].clientX : ev.clientX) - bb.left;
+    const tx = t0 + (t1 - t0) * Math.min(1, Math.max(0, (px / bb.width * W - mL) / (W - mL - mR)));
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(p.ts - tx) < Math.abs(best.ts - tx)) best = p;
+    cx.setAttribute("x1", x(best.ts)); cx.setAttribute("x2", x(best.ts)); cx.setAttribute("opacity", "1");
+    tip.innerHTML = `<div class="tt">${fmtTime(best.ts)}</div>` + series.map(s =>
+      `<div class="tr"><span style="display:inline-flex;align-items:center;gap:6px"><span class="swatch" style="background:var(${s.v})"></span>${s.label}</span><b>${Number.isFinite(best[s.key]) ? best[s.key] : "—"}</b></div>`).join("");
+    tip.style.opacity = "1";
+    const left = x(best.ts) / W * bb.width;
+    tip.style.left = Math.min(bb.width - tip.offsetWidth - 4, Math.max(4, left + 12)) + "px";
+    tip.style.top = "8px";
+  };
+  hit.addEventListener("mousemove", move);
+  hit.addEventListener("touchmove", move, { passive: true });
+  const leave = () => { tip.style.opacity = "0"; cx.setAttribute("opacity", "0"); };
+  hit.addEventListener("mouseleave", leave);
+  hit.addEventListener("touchend", leave);
+}
+
+/* --------------------------------------------------------------- app --- */
+let history = [], rangeN = 60, liveTimer = null, histTimer = null;
+
+function figure(id, title, sub, series) {
+  return `<figure>
+    <figcaption><div class="t">${title}</div><div class="s">${sub}</div></figcaption>
+    ${series.length > 1 ? `<div class="legend">${series.map(s => `<span><span class="swatch" style="background:var(${s.v})"></span>${s.label}</span>`).join("")}</div>` : ""}
+    <div class="chart" id="${id}"></div>
+  </figure>`;
+}
+
+function renderCharts() {
+  $("charts").innerHTML =
+    figure("cPm", "Particulate matter", "Micrograms per cubic metre (µg/m³)", SERIES) +
+    figure("cAqi", "Air quality index", "US EPA scale, 0–500 — the worse of the PM2.5 and PM10 sub-indices", [{ key: "aqi", label: "AQI", v: "--series-1" }]) +
+    figure("cGas", "Gas sensor", "MQ-2, raw ADC counts — a relative level, not a calibrated concentration", [{ key: "mq2", label: "Gas", v: "--series-2" }]);
+  lineChart($("cPm"), history, SERIES, { aria: "Particulate matter over time" });
+  lineChart($("cAqi"), history, [{ key: "aqi", label: "AQI", v: "--series-1" }], { aria: "Air quality index over time" });
+  lineChart($("cGas"), history, [{ key: "mq2", label: "Gas", v: "--series-2" }], { aria: "Gas sensor over time" });
+}
+
+function renderTable() {
+  const cols = [["Time", r => fmtTime(r.ts)], ["PM1.0", r => r.pm1_0], ["PM2.5", r => r.pm2_5],
+                ["PM10", r => r.pm10], ["AQI", r => r.aqi ?? "—"], ["Gas", r => Math.round(r.mq2)]];
+  $("histTable").innerHTML =
+    `<thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>` +
+    [...history].reverse().map(r => `<tr>${cols.map(c => `<td>${c[1](r) ?? "—"}</td>`).join("")}</tr>`).join("") +
+    `</tbody>`;
+  $("tableSub").textContent = `${history.length} records`;
+}
+
+function tile(label, value, unit, swatchVar) {
+  return `<div class="tile"><div class="k">${swatchVar ? `<span class="swatch" style="background:var(${swatchVar})"></span>` : ""}<span class="cap">${label}</span></div>
+    <div class="v">${value}<span class="u">${unit || ""}</span></div></div>`;
+}
+
+function renderLive(d) {
+  const stale = !d || !d.ts || (Date.now() - d.ts) > CFG.staleAfterMs;
+  $("linkDot").style.background = cssVar(stale ? "--critical" : "--good");
+  $("linkText").textContent = stale ? "no recent data" : "live";
+
+  if (!d) return;
+  const aqiOk = d.aqiValid && Number.isFinite(d.aqi);
+  const b = aqiOk ? band(d.aqi) : null;
+  $("aqi").textContent = aqiOk ? d.aqi : "—";
+  $("aqi").style.color = aqiOk ? cssVar(b.v) : "var(--muted)";
+  $("aqiCat").innerHTML = `<span class="dot" style="background:${aqiOk ? cssVar(b.v) : "var(--muted)"}"></span><span>${aqiOk ? b.name : "No data"}</span>`;
+  $("aqiSub").textContent = aqiOk
+    ? `Updated ${fmtTime(d.ts)} · device up ${Math.floor(d.uptimeSec / 3600)}h ${Math.floor(d.uptimeSec / 60) % 60}m`
+    : "The particulate sensor is not reporting.";
+
+  const warming = d.mqWarmedUp === false;
+  $("tiles").innerHTML =
+    tile("PM1.0", d.pm1_0, " µg/m³", "--series-3") +
+    tile("PM2.5", d.pm2_5, " µg/m³", "--series-1") +
+    tile("PM10", d.pm10, " µg/m³", "--series-2") +
+    tile("Gas (MQ-2)", warming ? "warming" : Math.round(d.mq2), warming ? ` ${d.mqWarmupRemainingSec}s left` : " raw", "--series-2") +
+    tile("Signal", d.rssi, " dBm") +
+    tile("Sensor", d.pmsConnected ? "OK" : "No signal", "");
+}
+
+async function pollLive() {
+  try { renderLive(await dbGet(`devices/${CFG.device}/live`)); $("note").textContent = ""; }
+  catch (e) { fail(e); }
+}
+
+async function pollHistory() {
+  try {
+    const raw = await dbGet(`devices/${CFG.device}/history`, `&orderBy=%22%24key%22&limitToLast=${rangeN}`);
+    history = Object.values(raw || {}).filter(r => r && r.ts).sort((a, b) => a.ts - b.ts);
+    renderCharts(); renderTable();
+  } catch (e) { fail(e); }
+}
+
+function fail(e) {
+  const m = String(e.message || e);
+  $("note").textContent = m === "PERMISSION_DENIED"
+    ? "Permission denied — this account is not allowed to read this device. Check the database rules."
+    : `Could not reach the database (${m}). Retrying.`;
+}
+
+function startApp() {
+  $("signin").classList.add("hide");
+  $("app").classList.remove("hide");
+  pollLive(); pollHistory();
+  clearInterval(liveTimer); clearInterval(histTimer);
+  liveTimer = setInterval(pollLive, CFG.livePollMs);
+  histTimer = setInterval(pollHistory, CFG.histPollMs);
+}
+
+/* ------------------------------------------------------------ wiring --- */
+$("signinForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const btn = $("signinBtn"); btn.disabled = true; btn.textContent = "Signing in…";
+  $("signinErr").classList.add("hide");
+  try {
+    await signIn($("email").value.trim(), $("password").value);
+    startApp();
+  } catch (e) {
+    const m = String(e.message);
+    $("signinErr").textContent =
+      /INVALID_LOGIN_CREDENTIALS|INVALID_PASSWORD|EMAIL_NOT_FOUND/.test(m) ? "That email and password do not match an account."
+      : /TOO_MANY_ATTEMPTS/.test(m) ? "Too many attempts. Wait a few minutes and try again."
+      : m;
+    $("signinErr").classList.remove("hide");
+  } finally { btn.disabled = false; btn.textContent = "Sign in"; }
+});
+
+$("outBtn").addEventListener("click", () => {
+  store.del("aerosense_rt"); idToken = refreshToken = null;
+  clearInterval(liveTimer); clearInterval(histTimer);
+  $("app").classList.add("hide"); $("signin").classList.remove("hide");
+});
+
+$("themeBtn").addEventListener("click", () => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark"
+    || (!document.documentElement.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+  $("themeBtn").textContent = dark ? "Dark" : "Light";
+  store.set("aerosense_theme", dark ? "light" : "dark");
+  if (history.length) renderCharts();
+  pollLive();
+});
+
+document.querySelectorAll("[data-range]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("[data-range]").forEach(o => o.setAttribute("aria-pressed", String(o === b)));
+  rangeN = Number(b.dataset.range);
+  pollHistory();
+}));
+
+$("viewChart").addEventListener("click", () => {
+  $("viewChart").setAttribute("aria-pressed", "true"); $("viewTable").setAttribute("aria-pressed", "false");
+  $("charts").classList.remove("hide"); $("tableFig").classList.add("hide");
+});
+$("viewTable").addEventListener("click", () => {
+  $("viewTable").setAttribute("aria-pressed", "true"); $("viewChart").setAttribute("aria-pressed", "false");
+  $("tableFig").classList.remove("hide"); $("charts").classList.add("hide");
+});
+
+/* --------------------------------------------------------- bootstrap --- */
+(function boot() {
+  const t = store.get("aerosense_theme");
+  if (t) document.documentElement.setAttribute("data-theme", t);
+  $("themeBtn").textContent =
+    (document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark"
+      ? "Light" : "Dark";
+
+  const rt = store.get("aerosense_rt");
+  if (!rt) return;
+  refreshToken = rt;
+  refresh().then(startApp).catch(() => { store.del("aerosense_rt"); refreshToken = null; });
+})();
+</script>
+</body>
+</html>
