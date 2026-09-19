@@ -1,20 +1,5 @@
 #include "UIManager.h"
 
-// Temporary input tracing, to find where a press is being lost. Set to 0 (or
-// delete the prints) once the Wi-Fi Setup entry is confirmed working.
-#define DEBUG_INPUT 1
-#if DEBUG_INPUT
-static const char *evtName(ButtonEvent e) {
-  switch (e) {
-    case ButtonEvent::BTN1_SHORT: return "B1";
-    case ButtonEvent::BTN2_SHORT: return "B2";
-    case ButtonEvent::BTN1_LONG:  return "B1_LONG";
-    case ButtonEvent::BTN2_LONG:  return "B2_LONG";
-    default: return "?";
-  }
-}
-#endif
-
 static const char *QUICK_MENU_LABELS[QUICK_MENU_COUNT] = {
   "Reset Statistics",
   "Wi-Fi Setup",
@@ -93,11 +78,6 @@ void UIManager::update() {
 void UIManager::handleInput() {
   ButtonEvent evt;
   while ((evt = _buttons->popEvent()) != ButtonEvent::NONE) {
-#if DEBUG_INPUT
-    Serial.printf("[ui] evt=%s warn=%d menu=%d wifi=%d page=%u\n",
-                  evtName(evt), (int)_warningShowing, (int)_menuOpen,
-                  (int)_wifiOpen, (unsigned)_page);
-#endif
     // While the banner owns the screen it also owns the buttons: the press
     // acknowledges it and nothing else. Letting navigation through here moved
     // the page invisibly behind the banner, so the user pressed once to clear
@@ -154,9 +134,6 @@ void UIManager::goToPage(Page p) {
 }
 
 void UIManager::openQuickMenu() {
-#if DEBUG_INPUT
-  Serial.println(F("[ui] openQuickMenu"));
-#endif
   _menuOpen = true;
   _menuIndex = 0;
   _menuEntered = false;
@@ -176,10 +153,6 @@ void UIManager::closeQuickMenu(bool execute) {
   _menuOpen = false;
   _pageEntered = false; // repaint the underlying page to clear the overlay
   _forceFrame = true;
-#if DEBUG_INPUT
-  Serial.printf("[ui] closeQuickMenu exec=%d idx=%u toWifi=%d\n",
-                (int)execute, (unsigned)_menuIndex, (int)toWifi);
-#endif
   if (toWifi) openWifiSetup();
 }
 

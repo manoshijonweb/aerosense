@@ -12,8 +12,6 @@
 #include "UIManager.h"
 
 void UIManager::openWifiSetup() {
-  Serial.printf("[ui] openWifiSetup wifi=%d portal=%d\n",
-                _wifi ? 1 : 0, _portal ? 1 : 0);
   // Both are needed: the portal to run the session, the manager to do the
   // connecting. An offline build passes neither, and the menu entry is inert.
   if (!_wifi || !_portal) return;
